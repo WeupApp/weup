@@ -114,26 +114,40 @@ export default function UpgradePage() {
 
     setLoadingPlan(plan)
     try {
-      const res = await fetch(`${SUPA_URL}/functions/v1/dynamic-endpoint`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${SUPA_KEY}`,
-          'apikey': SUPA_KEY,
-        },
-        body: JSON.stringify({ plan, billing, userId, userEmail, userName, origin: window.location.origin }),
-      })
+      const controller = new AbortController()
+      const timeoutId  = setTimeout(() => controller.abort(), 12000)
 
-      // Guard against non-JSON responses (e.g. 404/503 from undeployed function)
+      let res: Response
+      try {
+        res = await fetch(`${SUPA_URL}/functions/v1/dynamic-endpoint`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPA_KEY}`,
+            'apikey': SUPA_KEY,
+          },
+          body: JSON.stringify({ plan, billing, userId, userEmail, userName, origin: window.location.origin }),
+        })
+      } catch (fetchErr: unknown) {
+        const isTimeout = fetchErr instanceof Error && fetchErr.name === 'AbortError'
+        throw new Error(isTimeout
+          ? 'Request timed out. Please try again.'
+          : 'Could not reach the payment server. Check your internet connection.')
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      // Guard against non-JSON responses (404/503 HTML from undeployed function)
       const contentType = res.headers.get('content-type') || ''
       if (!contentType.includes('application/json')) {
-        throw new Error(`Server error (${res.status}). The payment function may not be deployed yet.`)
+        throw new Error(`Payment service unavailable (${res.status}). Please try again in a moment.`)
       }
 
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data.error || `Server returned ${res.status}`)
+        throw new Error(data.error || `Payment error (${res.status}). Please try again.`)
       }
 
       if (data.url) {
@@ -145,10 +159,10 @@ export default function UpgradePage() {
         }, { onConflict: 'id' })
         window.location.href = data.url
       } else {
-        throw new Error(data.error || 'No checkout URL returned. Check that MP_ACCESS_TOKEN is set in Supabase secrets.')
+        throw new Error(data.error || 'Could not create payment link. Please try again.')
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Checkout error'
+      const msg = err instanceof Error ? err.message : 'Something went wrong. Please try again.'
       console.error('[startCheckout]', msg)
       showToast(msg)
       setLoadingPlan(null)
@@ -290,7 +304,9 @@ export default function UpgradePage() {
                 onClick={() => startCheckout('pro')}
                 disabled={loadingPlan !== null}
               >
-                {loadingPlan === 'pro' ? 'Setting up…' : 'Start Pro free 14 days'}
+                {loadingPlan === 'pro'
+                  ? <><div className="btn-spinner" /> Setting up…</>
+                  : 'Start Pro free 14 days'}
               </button>
             )}
           </div>
@@ -324,7 +340,9 @@ export default function UpgradePage() {
                 onClick={() => startCheckout('family')}
                 disabled={loadingPlan !== null}
               >
-                {loadingPlan === 'family' ? 'Setting up…' : 'Start free 14 days'}
+                {loadingPlan === 'family'
+                  ? <><div className="btn-spinner" /> Setting up…</>
+                  : 'Start free 14 days'}
               </button>
             )}
           </div>
