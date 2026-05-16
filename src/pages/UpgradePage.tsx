@@ -124,7 +124,17 @@ export default function UpgradePage() {
         body: JSON.stringify({ plan, billing, userId, userEmail, userName, origin: window.location.origin }),
       })
 
+      // Guard against non-JSON responses (e.g. 404/503 from undeployed function)
+      const contentType = res.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Server error (${res.status}). The payment function may not be deployed yet.`)
+      }
+
       const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || `Server returned ${res.status}`)
+      }
 
       if (data.url) {
         await sb.from('profiles').upsert({
@@ -135,11 +145,12 @@ export default function UpgradePage() {
         }, { onConflict: 'id' })
         window.location.href = data.url
       } else {
-        throw new Error(data.error || 'Could not create checkout')
+        throw new Error(data.error || 'No checkout URL returned. Check that MP_ACCESS_TOKEN is set in Supabase secrets.')
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Checkout error'
-      showToast('Could not start checkout: ' + msg)
+      console.error('[startCheckout]', msg)
+      showToast(msg)
       setLoadingPlan(null)
     }
   }
